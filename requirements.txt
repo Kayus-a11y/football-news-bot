@@ -3,3 +3,4 @@ aiohttp
 requests
 apscheduler
 python-dotenv
+Pillow
