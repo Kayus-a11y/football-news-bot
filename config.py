@@ -3,7 +3,7 @@ config.py — Central configuration for the World Football News Telegram Bot.
 
 All secrets are loaded from environment variables (via a local .env file in
 development, or real environment variables in production). NEVER hardcode
-real tokens/keys in this file — copy .env.example to .env and fill it in.
+real tokens/keys in this file — copy .env.example to .env and fill it in
 """
 
 import os
