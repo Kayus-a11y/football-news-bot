@@ -3,8 +3,12 @@ bot.py — Main entry point for the World Football News Telegram Bot.
 
 Fetches the latest football news + today's top fixtures, renders a branded
 image, and posts it to the configured Telegram channel. Runs on a schedule
-(08:00, 14:00, 20:00 UTC by default) via APScheduler, and keeps the asyncio
-event loop alive indefinitely.
+(08:00, 14:00, 20:00 UTC by default, configurable in config.py) via
+APScheduler, and keeps the asyncio event loop alive indefinitely.
+
+Also runs a small polling handler so the bot responds to /start and /post
+in a private chat — useful for confirming the bot is alive and for
+triggering a manual test post without waiting for the schedule.
 
 Run with:  python bot.py
 """
@@ -16,8 +20,9 @@ import sys
 import aiohttp
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from telegram import Bot
+from telegram import Bot, Update
 from telegram.error import TelegramError
+from telegram.ext import Application, CommandHandler, ContextTypes
 
 import config
 from news_fetcher import fetch_latest_football_news
@@ -137,6 +142,30 @@ def build_scheduler() -> AsyncIOScheduler:
     return scheduler
 
 
+# ---------------------------------------------------------------------------
+# Telegram command handlers — lets you confirm the bot is alive and trigger
+# a manual test post from a private chat, without waiting for the schedule.
+# ---------------------------------------------------------------------------
+
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    times = ", ".join(f"{h:02d}:{m:02d}" for h, m in config.POST_TIMES_UTC)
+    await update.message.reply_text(
+        "✅ Football News Bot is online.\n"
+        f"Scheduled posts (UTC): {times}\n\n"
+        "Use /post to trigger an immediate test post to the channel."
+    )
+
+
+async def post_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text("⏳ Running the post job now, check the channel shortly...")
+    try:
+        await run_post_job()
+        await update.message.reply_text("✅ Post job finished. Check the channel and the Railway logs.")
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Manual /post trigger failed: %s", exc)
+        await update.message.reply_text(f"❌ Post job failed: {exc}")
+
+
 async def main() -> None:
     # config.py already validated that BOT_TOKEN, NEWS_API_KEY, and
     # API_FOOTBALL_KEY are set — it raises ValueError at import time if not,
@@ -144,15 +173,27 @@ async def main() -> None:
     scheduler = build_scheduler()
     scheduler.start()
 
-    logger.info("Bot is running. Waiting for scheduled post times (Ctrl+C to stop).")
+    application = Application.builder().token(config.BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("post", post_command))
 
-    # Keep the event loop alive indefinitely.
-    try:
-        while True:
-            await asyncio.sleep(3600)
-    except (KeyboardInterrupt, SystemExit):
-        logger.info("Shutdown signal received. Stopping scheduler.")
-        scheduler.shutdown(wait=False)
+    async with application:
+        await application.initialize()
+        await application.start()
+        await application.updater.start_polling()
+
+        logger.info("Bot is running. Waiting for scheduled post times (Ctrl+C to stop).")
+
+        try:
+            # Keep the event loop alive indefinitely.
+            while True:
+                await asyncio.sleep(3600)
+        except (KeyboardInterrupt, SystemExit):
+            logger.info("Shutdown signal received. Stopping scheduler and bot.")
+        finally:
+            scheduler.shutdown(wait=False)
+            await application.updater.stop()
+            await application.stop()
 
 
 if __name__ == "__main__":
