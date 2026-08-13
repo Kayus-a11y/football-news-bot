@@ -5,6 +5,10 @@ generate_post_image() draws the headline, source, and date onto a simple
 dark background and saves it to a temp file, returning the file path.
 Returns None if image generation fails for any reason (bot.py treats
 that as "skip this slot" rather than crashing).
+
+Uses Pillow's built-in scalable default font (ImageFont.load_default with
+a size argument, available since Pillow 10.1.0) so it doesn't depend on
+system fonts being installed in the deployment container.
 """
 
 import logging
@@ -23,21 +27,19 @@ ACCENT_COLOR = (0, 200, 120)     # green accent (tweak to your brand color)
 TEXT_COLOR = (255, 255, 255)
 MUTED_COLOR = (160, 160, 160)
 
-# Try to use a truetype font if available, otherwise fall back to default
-FONT_PATHS = [
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-]
 
-
-def _load_font(size: int) -> ImageFont.FreeTypeFont:
-    for path in FONT_PATHS:
-        if os.path.exists(path):
-            try:
-                return ImageFont.truetype(path, size)
-            except Exception:
-                continue
-    return ImageFont.load_default()
+def _load_font(size: int) -> ImageFont.ImageFont:
+    """
+    Load a scalable font at the given pixel size. Pillow >= 10.1.0 ships a
+    built-in TrueType font accessible via load_default(size=...), which
+    works in any environment without needing system fonts installed.
+    """
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:
+        # Older Pillow without the size argument -- fall back to fixed bitmap.
+        logger.warning("Pillow version too old for scalable default font; upgrade Pillow.")
+        return ImageFont.load_default()
 
 
 def generate_post_image(headline: str, source: str, date: str) -> str | None:
@@ -52,7 +54,7 @@ def generate_post_image(headline: str, source: str, date: str) -> str | None:
         # Top accent bar
         draw.rectangle([(0, 0), (WIDTH, 12)], fill=ACCENT_COLOR)
 
-        # "⚽ FOOTBALL NEWS" label
+        # "FOOTBALL NEWS" label
         label_font = _load_font(42)
         draw.text((60, 60), "FOOTBALL NEWS", font=label_font, fill=ACCENT_COLOR)
 
@@ -62,11 +64,11 @@ def generate_post_image(headline: str, source: str, date: str) -> str | None:
         y = 220
         for line in wrapped:
             draw.text((60, y), line, font=headline_font, fill=TEXT_COLOR)
-            y += 78
+            y += 82
 
-        # Source + date at the bottom
+        # Source + date near the bottom
         meta_font = _load_font(36)
-        meta_text = f"{source} · {date}"
+        meta_text = f"{source} \u00b7 {date}"
         draw.text((60, HEIGHT - 120), meta_text, font=meta_font, fill=MUTED_COLOR)
 
         # Bottom accent bar
@@ -79,6 +81,6 @@ def generate_post_image(headline: str, source: str, date: str) -> str | None:
 
         return out_path
 
-    except Exception as exc:  # noqa: BLE001 — never crash the caller
+    except Exception as exc:  # noqa: BLE001 -- never crash the caller
         logger.error("Image generation failed: %s", exc)
         return None
