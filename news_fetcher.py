@@ -80,8 +80,18 @@ async def fetch_latest_football_news(session: aiohttp.ClientSession) -> Optional
     an error status, or every candidate article has already been posted —
     callers should treat None as "skip this slot".
     """
+    # Bias toward worldwide soccer/football coverage (Premier League, Champions
+    # League, La Liga, Serie A, Bundesliga, World Cup, etc.) and explicitly
+    # exclude American football / college football, which NewsAPI otherwise
+    # frequently mixes in because "football" alone is ambiguous.
+    query = (
+        '(soccer OR "premier league" OR "champions league" OR uefa OR fifa '
+        'OR laliga OR "la liga" OR bundesliga OR "serie a" OR "world cup" '
+        'OR ligue1 OR "ligue 1" OR epl) '
+        'NOT (NFL OR NCAAF OR "college football" OR "American football")'
+    )
     params = {
-        "q": "football OR soccer",
+        "q": query,
         "sortBy": "publishedAt",
         "language": "en",
         "pageSize": FETCH_POOL_SIZE,
